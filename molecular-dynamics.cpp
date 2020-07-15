@@ -8,7 +8,7 @@
 const int Nline = 10;
 const int N = Nline * Nline * Nline;
 const double L = 10.0; // V= L*L*L
-const double T = 10.0;
+const double T = 100.0;
 const double dt = 0.001;
 const double rCut = 3.0;
 const double m = 1.0;
@@ -124,16 +124,16 @@ int main(void)
     {
         v[k] -= vCM;
     }
-
+    std::cout << "t,x,y,z,vx,vy,vz\n";
     for (int n = 0; n < Nsteps; n++)
     {
         force(F, r);
         moveV(v, vnew, F);
         moveR(r, rnew, vnew);
-        std::cout << n * dt << " " << Temp(v) << std::endl;
 
         for (int k = 0; k < N; k++)
         {
+            std::cout << n * dt << "," << r[k].x() << "," << r[k].y() << "," << r[k].z() << "," << v[k].x() << "," << v[k].y() << "," << v[k].z() << std::endl;
             v[k] = vnew[k];
             r[k] = rnew[k];
         }
