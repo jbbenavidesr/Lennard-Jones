@@ -3,19 +3,25 @@
 #include <fstream>
 
 #include "random64.h"
-#include "vector.h"
+#include "vector3D.h"
 
 const int Nline = 10;
 const int N = Nline * Nline * Nline;
 const double L = 10.0; // V= L*L*L
-const double T = 100.0;
+const double T = 10.0;
 const double dt = 0.001;
 const double rCut = 3.0;
 const double m = 1.0;
+const double TB = 4.0;
 
 double lennard_jones(double r)
 {
     return 24 * (2 * std::pow(r, -14) - std::pow(r, -8));
+}
+
+double potential(double r)
+{
+    return 4 * (std::pow(r, -12) - std::pow(r, -6));
 }
 
 Vector3D r_min(Vector3D r1, Vector3D r2)
@@ -33,11 +39,14 @@ Vector3D r_min(Vector3D r1, Vector3D r2)
 /* 
  * Calculates all forces between molecules in a given time step.
 */
-void force(Vector3D *F, Vector3D *r)
+void force(Vector3D *F, Vector3D *r, double *U)
 {
     // Every force starts in 0
     for (int k = 0; k < N; k++)
+    {
         F[k].load(0, 0, 0);
+        U[k] = 0;
+    }
 
     // calculate forces
     for (int i = 0; i < (N - 1); i++)
@@ -51,6 +60,8 @@ void force(Vector3D *F, Vector3D *r)
                 F[i] += f * dr;
                 F[j] -= f * dr;
                 // std::cout << norm(dr) << " " << f * norm(dr) << std::endl;
+                U[i] += potential(norm(dr));
+                U[j] += potential(norm(dr));
             }
         }
 }
@@ -82,12 +93,23 @@ double Temp(Vector3D *V)
     return t;
 }
 
+void thermostat(Vector3D *V, double tau)
+{
+    double l;
+    double T = Temp(V);
+    l = 1 + (dt / tau) * ((TB / T) - 1);
+    for (int k = 0; k < N; k++)
+        V[k] *= l;
+}
+
 int main(void)
 {
     CRandom ran64(1);
     double l = L / (Nline + 1);
     int Nsteps = (int)(T / dt);
     double x, y, z, vx, vy, vz;
+    double Teq = 10.0;
+    double tau = 5.0;
 
     /* Arrays for positions and velocities and force:
      * in positions r is for t and rnew is t+dt
@@ -95,6 +117,7 @@ int main(void)
      * force is only for t and F[k] is the total force on particle k    
     */
     Vector3D r[N], rnew[N], v[N], vnew[N], F[N];
+    double U[N];
 
     // Initial configuration
     for (int k = 0; k < N; k++) // Run through every molecule
@@ -107,9 +130,9 @@ int main(void)
 
         // Initial random velocities
         double vmax = 2.7;
-        vx = vmax * ran64.r();
-        vy = vmax * ran64.r();
-        vz = vmax * ran64.r();
+        vx = vmax * (2 * ran64.r() - 1);
+        vy = vmax * (2 * ran64.r() - 1);
+        vz = vmax * (2 * ran64.r() - 1);
         v[k].load(vx, vy, vz);
     }
 
@@ -124,19 +147,26 @@ int main(void)
     {
         v[k] -= vCM;
     }
-    std::cout << "t,x,y,z,vx,vy,vz\n";
+    std::cout << "t,x,y,z,vx,vy,vz,u\n";
     for (int n = 0; n < Nsteps; n++)
     {
-        force(F, r);
+        force(F, r, U);
         moveV(v, vnew, F);
         moveR(r, rnew, vnew);
 
         for (int k = 0; k < N; k++)
         {
-            std::cout << n * dt << "," << r[k].x() << "," << r[k].y() << "," << r[k].z() << "," << v[k].x() << "," << v[k].y() << "," << v[k].z() << std::endl;
+            std::cout << n * dt << "," << r[k].x() << "," << r[k].y() << "," << r[k].z() << "," << v[k].x() << "," << v[k].y() << "," << v[k].z() << "," << U[k] << std::endl;
             v[k] = vnew[k];
             r[k] = rnew[k];
         }
+        /*
+        if (n * dt > Teq)
+            thermostat(v, tau);
+
+        if (n * dt > Teq + 10)
+            tau = 1000;
+        */
     }
 
     return 0;
