@@ -18,10 +18,11 @@ const double coef2 = (1 - 2 * (Xi + Zi));
 const int Nx = 4, Ny = 4, Nz = 4;
 const int N = Nx * Ny * Nz;
 const double m0 = 1.0;
-const double tMax = 10.0;
+const double tMax = 100.0;
 const double tEq = 1.0;
 const double dt = 0.001;
 const double rCut = 3.0;
+const double TB = 1.5;
 
 // Random number generator
 const unsigned long long seed = 1;
