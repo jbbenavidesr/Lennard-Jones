@@ -5,19 +5,6 @@
 // ----- Class Declarations -----
 class HeatBath
 {
-private:
-    double xi, T, Q;
-
-public:
-    void init(double xi0, double TB, double Q);
-    void moveXi(double Temp, double dt);
-
-    // inline
-    inline double getXi(void) { return xi; };
-
-    // Friends
-    friend class Body;
-    friend class MolecularDynamics;
 };
 
 class Body
@@ -32,7 +19,6 @@ private:
 public:
     void init(double x, double y, double z, double vx, double vy, double vz, double mass = 1.0);
     void printState(double t);
-    void thermalMoveV(HeatBath &thermo);
 
     // --Inline Functions --
 
@@ -49,10 +35,10 @@ public:
     inline void addU(double dU) { U += dU; };
 
     // update of velocity
-    inline void moveV(double dt, double coef = 1) { v += (dt * coef / m) * F; };
+    inline void moveV(double dt, double coef = 1.0) { v += (dt * coef / m) * F; };
 
     // update of position
-    inline void moveR(double dt, double coef = 1) { r += (dt * coef) * v; };
+    inline void moveR(double dt, double coef = 1.0) { r += (dt * coef) * v; };
 
     // Get position
     inline Vector3D getR(void) { return r; };
@@ -81,6 +67,10 @@ public:
     void calculate_all_forces(Body *molecule);
     void leapFrogStep(Body *molecule, double dt);
     void leapFrogThermalStep(Body *molecule, HeatBath &thermo, double dt);
+
+    void velocityVerletStep(Body *molecule, double dt);
+    void velocityVerletThermalStep(Body *molecule, HeatBath &thermo, double dt);
+
     //void move_with_pefrl(Body *molecule, double dt);
     Vector3D forceLJ(Vector3D dr);
     double T(Body *molecule);
@@ -114,41 +104,6 @@ void Body::init(double x, double y, double z, double vx, double vy, double vz, d
 void Body::printState(double t)
 {
     std::cout << t << "," << r.x() << "," << r.y() << "," << r.z() << "," << v.x() << "," << v.y() << "," << v.z() << "," << U << std::endl;
-}
-
-/*
- * Updates the velocity with the nose hoover parameter.
- * 
- * @param HeatBath thermo: Nosé-Hoover thermostat
- */
-void Body::thermalMoveV(HeatBath &thermo)
-{
-    v -= (thermo.getXi() * dt) * v;
-    moveV(dt);
-}
-
-/*
- * Initializes the Nosé-Hoover thermostat.
- * 
- * @param double xi0: Initial parameter xi
- * @param double T: Desired Temperature
- * @param double Q: thermal conductiity parameter
- */
-void HeatBath::init(double xi0, double TB, double Q)
-{
-    xi = xi0;
-    T = TB;
-    Q = Q;
-}
-
-/*
- * Updates the speed of the heat bath 'particle'
- * 
- * @param double Temp: Current temperature of the system.
- */
-void HeatBath::moveXi(double Temp, double dt)
-{
-    xi += (dt * 3 * N / Q) * (Temp - TB);
 }
 
 /*
@@ -250,28 +205,28 @@ void MolecularDynamics::leapFrogStep(Body *molecule, double dt)
 }
 
 /*
- * Evolves one timestep of the system using a second order LeapFrog algorithm
- * and a Nose-Hoover thermostat
+ * Evolves one timestep of the system using a second order velocity verlet algorithm.
  * 
  * @param Body molecule: Array with all the particles of the system.
- * @param HeatBath thermo: Heat bath of the system.
  * @param double dt: Time step of the simulation
  */
-void MolecularDynamics::leapFrogThermalStep(Body *molecule, HeatBath &thermo, double dt)
+void MolecularDynamics::velocityVerletStep(Body *molecule, double dt)
 {
-    double Temp = T(molecule);
-    calculate_all_forces(molecule);
 
-    // Update thermostat
-    thermo.moveXi(Temp, dt);
     for (int k = 0; k < N; k++)
     {
-        // Update velocities
-        molecule[k].thermalMoveV(thermo);
+        // Update velocities to t + dt/2
+        molecule[k].moveV(dt, 0.5);
 
-        // Update Positions
+        // Update Positions to t +dt
         molecule[k].moveR(dt);
     }
+    // get force in t + dt
+    calculate_all_forces(molecule);
+
+    // Update velocities to t + dt
+    for (int k = 0; k < N; k++)
+        molecule[k].moveV(dt, 0.5);
 }
 
 /*

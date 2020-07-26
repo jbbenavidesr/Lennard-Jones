@@ -7,15 +7,14 @@
 int main(int argc, char *argv[])
 {
     Body Molecule[N];
-    HeatBath NoseHover;
     MolecularDynamics LennardJones;
     CRandom ran64(seed);
     int tSteps = (int)(tMax / dt);
-    double vMax = 1.0;
+    double vMax = 0.01;
 
     // Initial configuration
     LennardJones.init(ran64, vMax, Molecule);
-    NoseHover.init(0.5, TB, 1.0);
+    LennardJones.calculate_all_forces(Molecule);
 
     std::cout << "t,x,y,z,vx,vy,vz,u\n";
     for (int n = 0; n < tSteps; n++)
@@ -23,10 +22,10 @@ int main(int argc, char *argv[])
         for (int i = 0; i < N; i++)
         {
             Molecule[i].printState(n * dt);
-            // std::cout << dt * n << ',' << LennardJones.T(Molecule) << std::endl;
+            //std::cout << dt * n << ',' << LennardJones.T(Molecule) << std::endl;
         }
-        //LennardJones.leapFrogStep(Molecule, dt);
-        LennardJones.leapFrogThermalStep(Molecule, NoseHover, dt);
+
+        LennardJones.velocityVerletStep(Molecule, dt);
     }
 
     return 0;
