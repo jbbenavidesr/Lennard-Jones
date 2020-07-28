@@ -88,7 +88,7 @@ public:
     void velocityVerletThermalStep(Body *molecule, HeatBath &thermo, double dt);
 
     //void move_with_pefrl(Body *molecule, double dt);
-    Vector3D forceLJ(Vector3D dr);
+    double forceLJ(double r2);
     double T(Body *molecule);
     double K(Body *molecule);
     std::tuple<double, double> Binder(Body *molecule, int Mb);
@@ -199,11 +199,14 @@ void MolecularDynamics::calculate_force_pair(Body &molecule1, Body &molecule2)
     // Calculate rMin
     Vector3D dr;
     dr = rMin(molecule1, molecule2);
-    L += norm(dr);
 
-    if (norm(dr) < rCut)
+    double norm_dr = norm(dr);
+    L += norm_dr;
+
+    if (norm_dr < rCut)
     {
-        Vector3D f = forceLJ(dr);
+        double norm2_dr = norm_dr*norm_dr;
+        Vector3D f = forceLJ(norm2_dr)*dr;
         molecule1.addForce(f);
         molecule2.addForce((-1) * f);
     }
@@ -305,14 +308,17 @@ void MolecularDynamics::velocityVerletThermalStep(Body *molecule, HeatBath &ther
 /*
  * Calculates force using the Lennard-Jones potential for a couple of molecules.
  * 
- * @param Vector3D dr: vector from one molecule to the other.
+ * @param double r2: distance squared from one molecule to the other.
  * 
- * @return Vector3D Force vector between these molecules.
+ * @return double Force between these molecules.
 */
-Vector3D MolecularDynamics::forceLJ(Vector3D dr)
+double MolecularDynamics::forceLJ(double r2)
 {
-    double r = norm(dr);
-    return (24 * (2 * std::pow(r, -14) - std::pow(r, -8))) * dr;
+    double dr6 = r2*r2*r2;
+    double dr8 = dr6*r2;
+    dr6 = 1.0/dr6; dr8 = 1.0/dr8;
+
+    return 24*dr8*(2*dr6 - 1.0);
 }
 
 /*

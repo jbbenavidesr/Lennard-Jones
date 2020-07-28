@@ -14,14 +14,20 @@ const double rCut = 3.0;
 const double m = 1.0;
 const double TB = 4.0;
 
-double lennard_jones(double r)
+double lennard_jones(double r2)
 {
-    return 24 * (2 * std::pow(r, -14) - std::pow(r, -8));
+    double dr6 = r2*r2*r2;
+    double dr8 =  dr6*r2;
+    dr6 =  1.0/dr6;
+    dr8 = 1.0/dr8;
+    return 24*dr8*(2*dr6 - 1.0);
 }
 
-double potential(double r)
+double potential(double r2)
 {
-    return 4 * (std::pow(r, -12) - std::pow(r, -6));
+    double dr6 = r2*r2*r2;
+    dr6 = 1.0/dr;
+    return 4*dr6*(dr6 - 1.0);
 }
 
 Vector3D r_min(Vector3D r1, Vector3D r2)
@@ -54,23 +60,31 @@ void force(Vector3D *F, Vector3D *r, double *U)
         {
             Vector3D dr;
             dr = r_min(r[i], r[j]);
-            if (norm(dr) < rCut)
+            double norm_dr =  norm(dr);
+
+            if (norm_dr < rCut)
             {
-                double f = lennard_jones(norm(dr));
-                F[i] += f * dr;
-                F[j] -= f * dr;
+                double norm2_dr = norm_dr*normdr;
+                double f = lennard_jones(norm2_dr);
+                double dU = potential(norm2_dr);
+                vector3D dF = f * dr;
+
+
+                F[i] += dF;
+                F[j] -= dF;
                 // std::cout << norm(dr) << " " << f * norm(dr) << std::endl;
-                U[i] += potential(norm(dr));
-                U[j] += potential(norm(dr));
+                U[i] += dU;
+                U[j] += dU;
             }
         }
 }
 
 void moveV(Vector3D *v, Vector3D *vnew, Vector3D *F)
 {
+    double dt_m = dt/m;
     for (int k = 0; k < N; k++)
     {
-        vnew[k] = v[k] + (dt / m) * F[k];
+        vnew[k] = v[k] + dt_m*F[k];
     }
 }
 
