@@ -1,3 +1,5 @@
+#include <tuple>
+
 #include "constants.h"
 #include "vector3D.h"
 #include "random64.h"
@@ -5,6 +7,14 @@
 // ----- Class Declarations -----
 class HeatBath
 {
+private:
+    double xi, Q, T;
+
+public:
+    HeatBath(double xi0, double Tb = 1.0, double Q0 = 1.0);
+    void moveXi(double K, double dt);
+
+    inline double getXi(void) { return xi; };
 };
 
 class Body
@@ -52,6 +62,9 @@ public:
     // Set velocity
     inline void setV(Vector3D newV) { v = newV; };
 
+    //Get kinetic energy
+    inline double getK() { return 0.5 * m * norm2(v); };
+
     //-- Friends --
 
     friend Vector3D rMin(Body b1, Body b2);
@@ -61,6 +74,9 @@ public:
 
 class MolecularDynamics
 {
+private:
+    double L = 0;
+
 public:
     void init(CRandom &ran64, double vMax, Body *Molecule);
     void calculate_force_pair(Body &molecule1, Body &molecule2);
@@ -74,9 +90,31 @@ public:
     //void move_with_pefrl(Body *molecule, double dt);
     Vector3D forceLJ(Vector3D dr);
     double T(Body *molecule);
+    double K(Body *molecule);
+    std::tuple<double, double> Binder(Body *molecule, int Mb);
+
+    inline double getL() { return L; }
 };
 
 // ----- Function implementations -----
+
+/*
+ * Initializes Heat bath. 
+ */
+HeatBath::HeatBath(double xi0, double Tb, double Q0)
+{
+    xi = xi0;
+    Q = Q0;
+    T = Tb;
+}
+
+/*
+ * Updates the value of xi
+ */
+void HeatBath::moveXi(double K, double dt)
+{
+    xi += (dt / Q) * (K - (0.5 * (3 * N + 1) * T));
+}
 
 /*
  * Initializes the molecule in a given initial position, with a given velocity and a given mass
@@ -116,9 +154,9 @@ void MolecularDynamics::init(CRandom &ran64, double vmax, Body *Molecule)
 {
     double x, y, z, vx, vy, vz;
 
-    double dx = Lx / (Nx + 1);
-    double dy = Ly / (Ny + 1);
-    double dz = Lz / (Nz + 1);
+    double dx = 0.5 * Lx / (Nx + 1);
+    double dy = 0.5 * Ly / (Ny + 1);
+    double dz = 0.2 * Lz / (Nz + 1);
 
     // Initial configuration
     for (int k = 0; k < N; k++) // Run through every molecule
@@ -161,6 +199,7 @@ void MolecularDynamics::calculate_force_pair(Body &molecule1, Body &molecule2)
     // Calculate rMin
     Vector3D dr;
     dr = rMin(molecule1, molecule2);
+    L += norm(dr);
 
     if (norm(dr) < rCut)
     {
@@ -180,9 +219,13 @@ void MolecularDynamics::calculate_all_forces(Body *molecule)
     for (int i = 0; i < N; i++)
         molecule[i].resetForce();
 
+    L = 0;
+
     for (int i = 0; i < (N - 1); i++)
         for (int j = i + 1; j < N; j++)
             calculate_force_pair(molecule[i], molecule[j]);
+
+    L /= 0.5 * N * (N - 1);
 }
 
 /*
@@ -230,6 +273,36 @@ void MolecularDynamics::velocityVerletStep(Body *molecule, double dt)
 }
 
 /*
+ * Evolves one timestep of the system using a second order velocity verlet algorithm.
+ * 
+ * @param Body molecule: Array with all the particles of the system.
+ * @param HeatBath thermo: NoseHoover thermal bath.
+ * @param double dt: Time step of the simulation
+ */
+void MolecularDynamics::velocityVerletThermalStep(Body *molecule, HeatBath &thermo, double dt)
+{
+    double kin, dtHalf, factor;
+    kin = K(molecule);
+    dtHalf = 0.5 * dt;
+    for (int i = 0; i < N; i++)
+    {
+        molecule[i].v -= dtHalf * thermo.getXi() * molecule[i].getV();
+        molecule[i].moveV(dtHalf);
+        molecule[i].moveR(dt);
+    }
+    calculate_all_forces(molecule);
+    thermo.moveXi(kin, dtHalf);
+    kin = K(molecule);
+    thermo.moveXi(kin, dtHalf);
+    factor = 1 / (1 + dtHalf * thermo.getXi());
+    for (int i = 0; i < N; i++)
+    {
+        molecule[i].moveV(dtHalf);
+        molecule[i].v = factor * molecule[i].getV();
+    }
+}
+
+/*
  * Calculates force using the Lennard-Jones potential for a couple of molecules.
  * 
  * @param Vector3D dr: vector from one molecule to the other.
@@ -243,19 +316,67 @@ Vector3D MolecularDynamics::forceLJ(Vector3D dr)
 }
 
 /*
+ * Calculates the Kinetic Energy of the system in a given moment
+ * 
+ * @param Body molecule: Array with all the particles of the system.
+ */
+double MolecularDynamics::K(Body *molecule)
+{
+    double K = 0;
+    for (int i = 0; i < N; i++)
+    {
+        K += molecule[i].getK();
+    }
+    return K;
+}
+
+/*
  * Calculates the Temperature of the system in a given moment
  * 
  * @param Body molecule: Array with all the particles of the system.
  */
 double MolecularDynamics::T(Body *molecule)
 {
-    double T = 0;
-    for (int i = 0; i < N; i++)
-    {
-        T += norm2(molecule[i].getV());
-    }
-    T *= m0 / (3 * N);
+    double T = K(molecule);
+    T *= 2 / (3 * N);
     return T;
+}
+
+std::tuple<double, double> MolecularDynamics::Binder(Body *molecule, int Mb)
+{
+    Vector3D origin, r;
+    double lx, ly, lz, rohMean, m2, m4, cVol;
+    int nx, ny, nz, Mb3;
+    lx = Lx / Mb;
+    ly = Ly / Mb;
+    lz = Lz / Mb;
+    cVol = lx * ly * lz;
+    m2 = 0;
+    m4 = 0;
+    Mb3 = Mb * Mb * Mb;
+    rohMean = N / (cVol * Mb3);
+
+    int nMol[Mb3];
+    for (int i = 0; i < Mb3; i++)
+        nMol[i] = 0;
+
+    for (int k = 0; k < N; k++)
+    {
+        r = molecule[k].getR();
+        nx = ((int)(r.x() / lx)) % Mb;
+        ny = ((int)(r.y() / ly)) % Mb;
+        nz = ((int)(r.z() / lz)) % Mb;
+        nMol[nx + ny * Mb + nz * Mb * Mb] += 1;
+    }
+
+    for (int i = 0; i < Mb3; i++)
+    {
+        m2 += ((nMol[i] / cVol) - rohMean) * ((nMol[i] / cVol) - rohMean);
+        m4 += std::pow(((nMol[i] / cVol) - rohMean), 4);
+    }
+    m2 /= Mb3;
+    m4 /= Mb3;
+    return std::make_tuple(m2, m4);
 }
 
 /*
