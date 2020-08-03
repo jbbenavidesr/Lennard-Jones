@@ -8,13 +8,16 @@
 class HeatBath
 {
 private:
-    double xi, Q, T;
+    double p, eta, Q, T;
 
 public:
-    HeatBath(double xi0, double Tb = 1.0, double Q0 = 1.0);
-    void moveXi(double K, double dt);
+    HeatBath(double eta0, double p0, double Tb = 1.0, double Q0 = 1.0);
+    void moveP(double K, double dt);
 
-    inline double getXi(void) { return xi; };
+    inline void moveEta(double dt) { eta += dt * p / Q; };
+    inline double getEta(void) { return eta; };
+    inline double getP(void) { return p; };
+    inline double getQ(void) { return Q; };
 };
 
 class Body
@@ -28,7 +31,7 @@ private:
 
 public:
     void init(double x, double y, double z, double vx, double vy, double vz, double mass = 1.0);
-    void printState(double t);
+    void printState(double t, std::ofstream &File);
 
     // --Inline Functions --
 
@@ -65,6 +68,9 @@ public:
     //Get kinetic energy
     inline double getK() { return 0.5 * m * norm2(v); };
 
+    // print gnuplot animation
+    inline void print() { std::cout << "," << r.x() << "+0.2*cos(t)," << r.z() << "+0.2*sin(t)"; };
+
     //-- Friends --
 
     friend Vector3D rMin(Body b1, Body b2);
@@ -85,10 +91,11 @@ public:
     void leapFrogThermalStep(Body *molecule, HeatBath &thermo, double dt);
 
     void velocityVerletStep(Body *molecule, double dt);
-    void velocityVerletThermalStep(Body *molecule, HeatBath &thermo, double dt);
+    void thermalRESPA(Body *molecule, HeatBath &thermo, double dt);
 
     //void move_with_pefrl(Body *molecule, double dt);
     double forceLJ(double r2);
+    double potentialLJ(double r2);
     double T(Body *molecule);
     double K(Body *molecule);
     std::tuple<double, double> Binder(Body *molecule, int Mb);
@@ -101,19 +108,20 @@ public:
 /*
  * Initializes Heat bath. 
  */
-HeatBath::HeatBath(double xi0, double Tb, double Q0)
+HeatBath::HeatBath(double eta0, double p0, double Tb, double Q0)
 {
-    xi = xi0;
+    eta = eta0;
+    p = p0;
     Q = Q0;
     T = Tb;
 }
 
 /*
- * Updates the value of xi
+ * Updates the value of Ps
  */
-void HeatBath::moveXi(double K, double dt)
+void HeatBath::moveP(double K, double dt)
 {
-    xi += (dt / Q) * (K - (0.5 * (3 * N + 1) * T));
+    p += dt * (2 * K - (3 * N * T));
 }
 
 /*
@@ -139,9 +147,9 @@ void Body::init(double x, double y, double z, double vx, double vy, double vz, d
  * 
  * @param double t: The current timestep in the simulation
  */
-void Body::printState(double t)
+void Body::printState(double t, std::ofstream &File)
 {
-    std::cout << t << "," << r.x() << "," << r.y() << "," << r.z() << "," << v.x() << "," << v.y() << "," << v.z() << "," << U << std::endl;
+    File << t << "," << r.x() << "," << r.y() << "," << r.z() << "," << v.x() << "," << v.y() << "," << v.z() << "," << U << '\n';
 }
 
 /*
@@ -154,9 +162,9 @@ void MolecularDynamics::init(CRandom &ran64, double vmax, Body *Molecule)
 {
     double x, y, z, vx, vy, vz;
 
-    double dx = 0.5 * Lx / (Nx + 1);
-    double dy = 0.5 * Ly / (Ny + 1);
-    double dz = 0.2 * Lz / (Nz + 1);
+    double dx = Lx / (Nx + 1);
+    double dy = Ly / (Ny + 1);
+    double dz = 0.5 * Lz / (Nz + 1);
 
     // Initial configuration
     for (int k = 0; k < N; k++) // Run through every molecule
@@ -200,15 +208,17 @@ void MolecularDynamics::calculate_force_pair(Body &molecule1, Body &molecule2)
     Vector3D dr;
     dr = rMin(molecule1, molecule2);
 
-    double norm_dr = norm(dr);
-    L += norm_dr;
+    double norm2_dr = norm2(dr);
+    L += std::sqrt(norm2_dr);
 
-    if (norm_dr < rCut)
+    if (norm2_dr < (rCut * rCut))
     {
-        double norm2_dr = norm_dr*norm_dr;
-        Vector3D f = forceLJ(norm2_dr)*dr;
+        Vector3D f = forceLJ(norm2_dr) * dr;
+        double u = potentialLJ(norm2_dr);
         molecule1.addForce(f);
+        molecule1.addU(u);
         molecule2.addForce((-1) * f);
+        molecule2.addU(u);
     }
 }
 
@@ -220,7 +230,10 @@ void MolecularDynamics::calculate_force_pair(Body &molecule1, Body &molecule2)
 void MolecularDynamics::calculate_all_forces(Body *molecule)
 {
     for (int i = 0; i < N; i++)
+    {
         molecule[i].resetForce();
+        molecule[i].resetU();
+    }
 
     L = 0;
 
@@ -282,27 +295,31 @@ void MolecularDynamics::velocityVerletStep(Body *molecule, double dt)
  * @param HeatBath thermo: NoseHoover thermal bath.
  * @param double dt: Time step of the simulation
  */
-void MolecularDynamics::velocityVerletThermalStep(Body *molecule, HeatBath &thermo, double dt)
+void MolecularDynamics::thermalRESPA(Body *molecule, HeatBath &thermo, double dt)
 {
     double kin, dtHalf, factor;
     kin = K(molecule);
     dtHalf = 0.5 * dt;
+    thermo.moveP(kin, dtHalf); // 1
+    thermo.moveEta(dtHalf);    // 2
+    factor = std::exp((-1) * thermo.getP() * dtHalf / thermo.getQ());
     for (int i = 0; i < N; i++)
     {
-        molecule[i].v -= dtHalf * thermo.getXi() * molecule[i].getV();
-        molecule[i].moveV(dtHalf);
-        molecule[i].moveR(dt);
+        molecule[i].setV(factor * molecule[i].getV()); // 3
+        molecule[i].moveV(dtHalf);                     // 4
+        molecule[i].moveR(dt);                         // 5
     }
-    calculate_all_forces(molecule);
-    thermo.moveXi(kin, dtHalf);
+
+    calculate_all_forces(molecule); // 6
+
+    for (int i = 0; i < N; i++)
+    {
+        molecule[i].moveV(dtHalf);                     // 7
+        molecule[i].setV(factor * molecule[i].getV()); // 8
+    }
     kin = K(molecule);
-    thermo.moveXi(kin, dtHalf);
-    factor = 1 / (1 + dtHalf * thermo.getXi());
-    for (int i = 0; i < N; i++)
-    {
-        molecule[i].moveV(dtHalf);
-        molecule[i].v = factor * molecule[i].getV();
-    }
+    thermo.moveEta(dtHalf);    // 9
+    thermo.moveP(kin, dtHalf); // 10
 }
 
 /*
@@ -314,11 +331,27 @@ void MolecularDynamics::velocityVerletThermalStep(Body *molecule, HeatBath &ther
 */
 double MolecularDynamics::forceLJ(double r2)
 {
-    double dr6 = r2*r2*r2;
-    double dr8 = dr6*r2;
-    dr6 = 1.0/dr6; dr8 = 1.0/dr8;
+    double dr6 = r2 * r2 * r2;
+    double dr8 = dr6 * r2;
+    dr6 = 1.0 / dr6;
+    dr8 = 1.0 / dr8;
 
-    return 24*dr8*(2*dr6 - 1.0);
+    return 24 * dr8 * (2 * dr6 - 1.0) - 8 * c2;
+}
+
+/*
+ * Calculates potential using the Lennard-Jones potential for a couple of molecules.
+ * 
+ * @param double r2: distance squared from one molecule to the other.
+ * 
+ * @return double Potential Energy between these molecules.
+*/
+double MolecularDynamics::potentialLJ(double r2)
+{
+    double dr6 = r2 * r2 * r2;
+    dr6 = 1.0 / dr6;
+
+    return 4 * (dr6 * (dr6 - 1.0) + c2 * r2 + c0);
 }
 
 /*

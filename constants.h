@@ -3,7 +3,7 @@
 #include <fstream>
 
 // Geometry constants
-const double Lx = 20.0, Ly = 20.0, Lz = 50.0;
+const double Lx = 8, Ly = Lx, Lz = 2 * Lx;
 const double V = Lx * Ly * Lz;
 
 // PEFRL
@@ -19,9 +19,11 @@ const int Nx = 4, Ny = 4, Nz = 4;
 const int N = Nx * Ny * Nz;
 const double m0 = 1.0;
 const double tMax = 100.0;
-const double tEq = 25.0;
-const double dt = 0.001;
+const double tEq = 500.0;
+const double dt = 0.005;
 const double rCut = 3.0;
+const double c2 = 3 * std::pow(rCut, -8) * (2 * std::pow(rCut, -6) - 1);
+const double c0 = std::pow(rCut, -6) * (4 - 7 * std::pow(rCut, -6));
 const double TB = 1;
 
 // Random number generator
